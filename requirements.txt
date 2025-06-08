@@ -1,0 +1,5 @@
+ccxt>=4.4.88
+pandas>=2.3.0
+pyarrow>=19.0.1
+tqdm>=4.67.1
+nautilus-trader>=1.218.0
