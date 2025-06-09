@@ -1,21 +1,25 @@
-# nautilus-harvester
+# nautilus‑harvester
 
-*Universal market‑data downloader that mirrors OHLCV bars into a Nautilus‑Trader Parquet catalog*
-
-## Features
-
-| ✔                        | Description                                                                    |
-| ------------------------ |--------------------------------------------------------------------------------|
-| **Multi‑exchange**       | Binance spot & USD‑M perpetual out‑of‑the‑box; other CCXT venues pluggable     |
-| **Incremental**          | Writes `year/month/0.parquet` only when a month is missing – never overwrites  |
-| **Fully NT‑compatible**  | Arrow schema & folder layout recognised by `ParquetDataCatalog`                |
-| **Parallel**             | Thread‑pool fetcher (one REST client per thread) ⇒ fast bulk sync              |
-| **Zero global installs** | Uses [`uv`](https://github.com/astral-sh/uv) for lightning‑fast isolated venvs |
-| **Modern DX**            | `ruff` + `black` pre‑commit, typed code, colour logs via `rich`                |
+*Universal market‑data downloader that mirrors Binance OHLCV bars into a Nautilus‑Trader Parquet catalog*
 
 ---
 
-## Quick Start (15 sec)
+## Features
+
+| ✔                        | Description                                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **Multi‑exchange**       | Binance **spot** & **USD‑M perpetual** supported out‑of‑the‑box; other CCXT venues pluggable              |
+| **Daily *and* monthly**  | Pass `--period daily` or `--period monthly` (or use `--daily`) – folder structure is **identical to Binance archives** |
+| **Incremental**          | Writes only when a partition is missing – never overwrites existing Parquet files                         |
+| **API fallback**         | If a ZIP archive is not published yet (or 404), the loader seamlessly pulls the same range via REST API   |
+| **Fully NT‑compatible**  | Arrow schema & directory layout recognised by `ParquetDataCatalog`                                        |
+| **Parallel**             | Thread‑pool fetcher (one REST client per thread) ⇒ lightning‑fast bulk sync                               |
+| **Zero global installs** | Powered by [`uv`](https://github.com/astral-sh/uv) for ultra‑fast isolated venvs                          |
+| **Modern DX**            | Typed code, `ruff` + `black` pre‑commit, colour logs via `rich`                                           |
+
+---
+
+## Quick Start (≈15 sec)
 
 ```bash
 # clone and enter the repo
@@ -28,53 +32,76 @@ uv venv && source .venv/bin/activate
 # install runtime deps (cached wheels → seconds)
 uv pip install -r requirements.txt
 
-# download one year of BTC & ETH USD‑M perp minutes
+# download one year of BTC & ETH USD‑M perp *monthly* 1‑minute bars
 python nautilus_harvester.py \
-  --exchange binance   \
-  --market   futures   \
-  --symbols  BTCUSDT ETHUSDT \
-  --start    2024-01   \
-  --end      2024-12   \
-  --catalog  ./catalog \
-  --workers  6
+  --exchange  binance   \
+  --market    futures   \
+  --symbols   BTCUSDT ETHUSDT \
+  --period    monthly   \
+  --start     2024-01   \
+  --end       2024-12   \
+  --interval  1m        \
+  --catalog   ./catalog \
+  --workers   6
 ```
 
-Resulting tree (example):
+### Daily example
+
+```bash
+python nautilus_harvester.py \
+  --exchange  binance      \
+  --market    spot         \
+  --symbols   BTCUSDT      \
+  --period    daily        \
+  --start     2024-05-15   \
+  --end       2024-05-20   \
+  --interval  1m           \
+  --catalog   ./catalog    \
+  --workers   4
+```
+
+Resulting tree (daily layout example):
 
 ```text
 catalog/
-└─ data/
-   └─ bar/
-      ├─ btcusdt.binance-1-minute-last-external/
-      │   └─ 2024/06/0.parquet
-      └─ ethusdt.binance-1-minute-last-external/
-          └─ 2024/06/0.parquet
+└─ futures/um/daily/klines/BTCUSDT/1m/
+   ├─ BTCUSDT-1m-2024-05-15.parquet
+   ├─ BTCUSDT-1m-2024-05-16.parquet
+   └─ …
 ```
 
-Use in backtests / live NT nodes:
+Monthly layout looks like:
+
+```text
+catalog/
+└─ futures/um/monthly/klines/BTCUSDT/1m/
+   └─ BTCUSDT-1m-2024-05.parquet
+```
+
+Both layouts are automatically discovered by **Nautilus‑Trader**:
 
 ```python
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
-from nautilus_trader.backtest.engine import BacktestEngine
-
 catalog = ParquetDataCatalog("./catalog")
-engine  = BacktestEngine(data_catalog_path="./catalog")
-# engine.request_bars(...) etc.
 ```
 
 ---
 
 ## CLI Reference
 
-| flag         | required | example            | description                 |
-| ------------ | -------- | ------------------ |-----------------------------|
-| `--exchange` | ✔        | `binance`          | CCXT exchange id            |
-| `--market`   | ✔        | `spot` / `futures` | `futures` ⇒ USD‑M perpetual |
-| `--symbols`  | ✔        | `BTCUSDT ETHUSDT`  | space‑separated list        |
-| `--start`    | ✔        | `2023-01`          | first month (inclusive)     |
-| `--end`      | ✔        | `2025-01`          | last month (inclusive)      |
-| `--catalog`  | ✖        | `./catalog`        | Parquet catalog root        |
-| `--workers`  | ✖        | `6`                | download threads            |
+| flag            | required | example                   | description                                   |
+| --------------- | -------- | ------------------------- | --------------------------------------------- |
+| `--exchange`    | ✔        | `binance`                 | CCXT exchange id                              |
+| `--market`      | ✔        | `spot` / `futures`        | `futures` ⇒ USD‑M perpetual                   |
+| `--futures_sub` | ✖        | `um` / `cm`               | futures sub‑folder (`um`=USDT‑M, `cm`=COIN‑M) |
+| `--symbols`     | ✔        | `BTCUSDT ETHUSDT`         | space‑separated list or `ALL`                 |
+| `--period`      | ✖        | `daily` / `monthly`       | archive granularity (use `--daily` for short; default: `monthly`) |
+| `--daily`       | ✖        |                           | shortcut for `--period daily` (kept for backward compatibility)   |
+| `--start`       | ✔        | `2023-01` or `2023-01-15` | first month/day (inclusive)                                       |
+| `--end`         | ✔        | `2025-01` or `2023-03-01` | last month/day (inclusive)                                        |
+| `--interval`    | ✖        | `1m`                      | kline timeframe (default `1m`)                                    |
+| `--catalog`     | ✖        | `./catalog`               | Parquet catalog root                                              |
+| `--workers`     | ✖        | `6`                       | download threads                                                  |
 
 ---
 
@@ -89,7 +116,7 @@ nautilus-harvester/
 └── nautilus_harvester.py  # single‑file CLI
 ```
 
-> **Tip:** the code is 100 % typed & linted. Run `ruff` and `black` pre‑commit hooks locally:
+> **Tip:** the code is fully typed & linted. Run `ruff` and `black` pre‑commit hooks locally:
 >
 > ```bash
 > uv pip install pre-commit
@@ -98,17 +125,20 @@ nautilus-harvester/
 
 ---
 
-## Cron example (daily update, 03:00 UTC)
+## Cron example (daily update, 03:00 UTC)
 
 ```cron
 0 3 * * * cd /data/harvester && \
   source .venv/bin/activate && \
   python nautilus_harvester.py \
-    --exchange binance --market futures \
-    --symbols BTCUSDT ETHUSDT \
-    --start 2024-01 --end $(date +\%Y-\%m) \
-    --catalog /data/nt_catalog \
-    --workers 6 >> harvest.log 2>&1
+    --exchange  binance         \
+    --market    futures         \
+    --symbols   BTCUSDT ETHUSDT \
+    --period    daily           \
+    --start     2024-01-01      \
+    --end       $(date +\%Y-\%m-\%d) \
+    --catalog   /data/nt_catalog \
+    --workers   6 >> harvest.log 2>&1
 ```
 
 ---
